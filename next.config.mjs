@@ -2,37 +2,31 @@
 const nextConfig = {
 
   /**
-   * COEP + COOP headers are mandatory for SharedArrayBuffer,
-   * which @ffmpeg/ffmpeg uses internally for multi-threaded WASM.
+   * COEP + COOP headers required for SharedArrayBuffer (@ffmpeg/ffmpeg).
    */
   async headers() {
     return [
       {
         source: "/:path*",
         headers: [
-          { key: "Cross-Origin-Embedder-Policy", value: "require-corp"  },
-          { key: "Cross-Origin-Opener-Policy",   value: "same-origin"   },
-          { key: "Cross-Origin-Resource-Policy", value: "cross-origin"  },
+          { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
+          { key: "Cross-Origin-Opener-Policy",   value: "same-origin"  },
+          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
         ],
       },
     ];
   },
 
   /**
-   * These packages use Node.js built-ins and must stay server-side.
+   * In Next.js 15 the key moved from experimental to top-level.
+   * Keeps groq-sdk and elevenlabs server-only (they use Node.js built-ins).
    */
-  experimental: {
-    serverComponentsExternalPackages: ["groq-sdk", "elevenlabs"],
-  },
+  serverExternalPackages: ["groq-sdk", "elevenlabs"],
 
-  /**
-   * Allow WASM imports from @ffmpeg/core (loaded from unpkg CDN at runtime).
-   */
   webpack(config) {
     config.experiments = { ...config.experiments, asyncWebAssembly: true };
     return config;
   },
-
 };
 
 export default nextConfig;
