@@ -22,21 +22,6 @@ const FFMPEG_CORE_URL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-c
 const FFMPEG_WASM_URL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm";
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Build a chained atempo filter string (atempo range is [0.5, 2.0]). */
-function buildAtempo(speed: number): string {
-  if (Math.abs(speed - 1) < 0.03) return "";
-  const parts: string[] = [];
-  let r = speed;
-  while (r > 2.0) { parts.push("atempo=2.0"); r /= 2.0; }
-  while (r < 0.5) { parts.push("atempo=0.5"); r /= 0.5; }
-  if (Math.abs(r - 1) > 0.03) parts.push(`atempo=${r.toFixed(5)}`);
-  return parts.join(",");
-}
-
-// ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
