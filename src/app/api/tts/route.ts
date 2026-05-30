@@ -4,19 +4,17 @@
  * Body:    { text: string, voiceId: string, modelId?: string }
  * Returns: audio/mpeg stream
  *
- * Updated for elevenlabs SDK v1.x  (breaking change from 0.x)
- * - Import is now:  import { ElevenLabsClient } from "elevenlabs"
- * - convertAsStream() returns a Node.js Readable in v1.x
+ * ElevenLabs SDK v1.59 — textToSpeech.convertAsStream() returns
+ * an async-iterable of Buffer chunks.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { ElevenLabsClient } from "elevenlabs";
-import { Readable } from "stream";
 
 export const maxDuration = 30;
 
-const DEFAULT_VOICE_ID = process.env.ELEVENLABS_DEFAULT_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM";
-const DEFAULT_MODEL    = "eleven_multilingual_v2";
+const DEFAULT_VOICE = process.env.ELEVENLABS_DEFAULT_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM";
+const DEFAULT_MODEL = "eleven_multilingual_v2";
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,20 +27,20 @@ export async function POST(req: NextRequest) {
 
     const body    = await req.json();
     const text    = (body.text    as string)?.trim();
-    const voiceId = (body.voiceId as string)  || DEFAULT_VOICE_ID;
-    const modelId = (body.modelId as string)  || DEFAULT_MODEL;
+    const voiceId = (body.voiceId as string) || DEFAULT_VOICE;
+    const modelId = (body.modelId as string) || DEFAULT_MODEL;
 
     if (!text) {
       return NextResponse.json({ error: "No text provided" }, { status: 400 });
     }
     if (text.length > 2500) {
-      return NextResponse.json({ error: "Text exceeds 2500 chars per request" }, { status: 400 });
+      return NextResponse.json({ error: "Text too long (max 2500 chars)" }, { status: 400 });
     }
 
     const client = new ElevenLabsClient({ apiKey });
 
-    // SDK v1.x: convertAsStream returns a Node.js Readable stream
-    const nodeStream = await client.textToSpeech.convertAsStream(voiceId, {
+    // v1.x returns an async-iterable stream of Buffer/Uint8Array chunks
+    const audioStream = await client.textToSpeech.convertAsStream(voiceId, {
       text,
       model_id:      modelId,
       output_format: "mp3_44100_128",
@@ -54,31 +52,25 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Convert Node.js Readable → Web ReadableStream for Next.js Response
-    const webStream = new ReadableStream({
-      start(controller) {
-        // Handle both async iterable (v1.x) and Node Readable (older v1)
-        if (Symbol.asyncIterator in nodeStream) {
-          (async () => {
-            try {
-              for await (const chunk of nodeStream as AsyncIterable<Buffer>) {
-                controller.enqueue(new Uint8Array(chunk));
-              }
-              controller.close();
-            } catch (e) {
-              controller.error(e);
-            }
-          })();
-        } else {
-          const readable = nodeStream as Readable;
-          readable.on("data",  (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
-          readable.on("end",   ()              => controller.close());
-          readable.on("error", (e: Error)      => controller.error(e));
+    // Pipe async-iterable → Web ReadableStream for Next.js Response
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of audioStream) {
+            controller.enqueue(
+              chunk instanceof Uint8Array
+                ? chunk
+                : new Uint8Array(Buffer.from(chunk as Buffer)),
+            );
+          }
+          controller.close();
+        } catch (e) {
+          controller.error(e);
         }
       },
     });
 
-    return new Response(webStream, {
+    return new Response(readable, {
       headers: {
         "Content-Type":  "audio/mpeg",
         "Cache-Control": "no-store",
@@ -87,7 +79,9 @@ export async function POST(req: NextRequest) {
 
   } catch (err: unknown) {
     console.error("[/api/tts]", err);
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    );
   }
 }
