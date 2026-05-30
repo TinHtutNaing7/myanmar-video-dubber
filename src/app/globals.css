@@ -1,0 +1,63 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --navy-900: #050912;
+  --navy-800: #080d18;
+  --navy-700: #0a1020;
+  --navy-600: #0d1828;
+  --navy-500: #111f35;
+  --navy-400: #1a2640;
+  --navy-300: #243050;
+  --navy-200: #2e3d62;
+  --amber:    #f59e0b;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  background: var(--navy-800);
+  color: #f0f0f0;
+  font-family: 'IBM Plex Mono', 'Menlo', monospace;
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar        { width: 6px; }
+::-webkit-scrollbar-track  { background: var(--navy-700); }
+::-webkit-scrollbar-thumb  { background: var(--navy-300); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--amber); }
+
+/* Range input amber accent */
+input[type="range"] { accent-color: var(--amber); }
+
+/* Focus ring */
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+/* Radial grid background helper */
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(59, 130, 246, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 130, 246, 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Glow effect for active step */
+.step-glow {
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+}
+
+/* Smooth progress bar animation */
+.progress-fill {
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Pulse animation for running step */
+@keyframes pulse-amber {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+  50%       { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0);  }
+}
+.pulse-amber { animation: pulse-amber 2s infinite; }
