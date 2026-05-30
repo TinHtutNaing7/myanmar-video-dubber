@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback } from "react";
 import type { DubSettings, PipelineStep } from "@/lib/types";
 import { useDubPipeline } from "@/hooks/useDubPipeline";
-import { buildSRT, downloadBlob, downloadSRT } from "@/lib/srt";
+import { downloadBlob, downloadSRT } from "@/lib/srt";
 
 // ─── Static data ──────────────────────────────────────────────────────────────
 
@@ -172,7 +172,6 @@ export default function Home() {
   const handleReset = () => { setFile(null); reset(); };
 
   const isIdle      = state.step === "idle";
-  const isRunning   = !["idle","completed","error"].includes(state.step);
   const isDone      = state.step === "completed";
   const isFailed    = state.step === "error";
   const hasJob      = !isIdle;
