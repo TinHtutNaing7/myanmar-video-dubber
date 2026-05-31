@@ -1,17 +1,34 @@
 /**
  * POST /api/transcribe
  *
- * Accepts multipart form with "audio" file field.
+ * Accepts multipart form with an "audio" file field.
  * Returns: { segments: [{id, start, end, text}], language, duration }
  *
- * groq-sdk v1.x — import is still "groq-sdk", client init unchanged.
- * Free tier: 7,200 audio seconds/hour.
+ * groq-sdk v1.x types the transcription response as `Transcription` (text-only)
+ * even when response_format is "verbose_json". The segments array exists at
+ * runtime but is absent from the SDK TypeScript types, so we cast via a local
+ * VerboseTranscription interface rather than using `any`.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import Groq from "groq-sdk";
 
 export const maxDuration = 60;
+
+// Local type that reflects the actual runtime shape of a verbose_json response
+interface VerboseSegment {
+  id?:   number;
+  start: number;
+  end:   number;
+  text:  string;
+}
+
+interface VerboseTranscription {
+  text:      string;
+  language?: string;
+  duration?: number;
+  segments?: VerboseSegment[];
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,13 +48,15 @@ export async function POST(req: NextRequest) {
 
     const groq = new Groq({ apiKey });
 
-    const transcription = await groq.audio.transcriptions.create({
+    // Cast to VerboseTranscription — segments exist at runtime but are missing
+    // from the SDK's TypeScript Transcription type when verbose_json is used.
+    const transcription = (await groq.audio.transcriptions.create({
       file:                    audioFile,
       model:                   "whisper-large-v3-turbo",
       response_format:         "verbose_json",
       timestamp_granularities: ["segment"],
       language:                "auto",
-    });
+    })) as unknown as VerboseTranscription;
 
     const segments = (transcription.segments ?? [])
       .filter((s) => s.text?.trim())
