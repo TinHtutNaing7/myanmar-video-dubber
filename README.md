@@ -1,171 +1,150 @@
-# 🎬 Myanmar Video Dubber
+# 🎬 Htut Movie Recap & Dubbing Studio — Premium AI Suite v3
 
-> Auto-dub any video into Burmese using **Groq Whisper** (transcription) · **Gemini 2.0 Flash** (translation) · **ElevenLabs** (voiceover) · **ffmpeg.wasm** (video assembly in the browser). Deploys to Vercel in minutes with zero server infrastructure for video processing.
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USERNAME/myanmar-video-dubber&env=GROQ_API_KEY,GEMINI_API_KEY,ELEVENLABS_API_KEY,ELEVENLABS_DEFAULT_VOICE_ID&project-name=myanmar-video-dubber)
-
----
+A premium AI-powered **Myanmar Movie Recap & Dubbing Production Suite** built with Next.js, Tailwind CSS, and the Google Gemini 2.5 Flash API.
 
 ## ✨ Features
 
-| Feature | Stack | Free Tier |
-|---|---|---|
-| Speech transcription | Groq `whisper-large-v3-turbo` | ✅ 7,200 sec/hr |
-| Text translation | Gemini `gemini-2.0-flash` | ✅ 1,500 req/day |
-| Burmese voiceover | ElevenLabs `eleven_multilingual_v2` | ✅ 10k chars/mo |
-| Video assembly | `@ffmpeg/ffmpeg` WASM in browser | ✅ Always free |
-| SRT subtitle export | Built-in generator | ✅ Always free |
-| Workflows | Video Dub · Audio Dub · Subtitles · Storytelling | — |
-| Deploy target | Vercel (Next.js 14 App Router) | ✅ Hobby plan |
+### Hub 1 — Interactive Subtitle Studio & Timeline
+- Real-time subtitle visualization synced to video playback
+- Click-to-edit individual Myanmar translation segments
+- Per-segment TTS synthesis with auto speed-fit dubbing
+- Active segment highlighting during playback
+
+### Hub 2 — AI Burmese Movie Recap Script Generator
+- Analyzes compiled translations to compose social-media-style recap scripts
+- Dramatic storytelling format: Introduction → Story Arc → Cliffhanger
+- Myanmar language (ဇာတ်လမ်းပြောပြသူ) narrative style
+- Full long-form audio narration synthesis
+
+### Hub 3 — 30-Second Micro-Chunk Scheduler
+- Safely splits audio into parallelized 30s slices
+- Visual RPM budget meter for Free Tier (15 RPM) threshold monitoring
+- Prevents client/serverless timeouts on long-form video
+- Per-chunk progress tracking with real-time status updates
+
+### Hub 4 — Myanmar Simultaneous TTS Console
+- Dual-speaker A/B dialogue testing
+- Configurable voices: Kore, Fenrir, Leda, Zephyr, Aoede, Puck
+- 5 emotional registers: Excited, Calm, Cheerful, Whisper, Dramatic
+- Concurrent or sequential playback modes with variable speed
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Deploy to Vercel
 
-### 1. Clone
+### Option 1: One-Click via GitHub
+
+1. **Push to GitHub**
+   ```bash
+   git init
+   git add .
+   git commit -m "Initial commit: Htut Dubber Studio v3"
+   git remote add origin https://github.com/YOUR_USERNAME/htut-dubber-studio.git
+   git push -u origin main
+   ```
+
+2. **Deploy on Vercel**
+   - Go to [vercel.com](https://vercel.com) → **New Project**
+   - Import your GitHub repository
+   - Framework will auto-detect as **Next.js**
+   - Click **Deploy** — no environment variables needed (API key entered in-app)
+
+### Option 2: Vercel CLI
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/myanmar-video-dubber.git
-cd myanmar-video-dubber
+npm install -g vercel
+vercel login
+vercel --prod
+```
+
+---
+
+## 🛠 Local Development
+
+```bash
+# Install dependencies
 npm install
-```
 
-### 2. Add API keys
-
-```bash
-cp .env.example .env.local
-# Edit .env.local with your keys (see Free API Tiers below)
-```
-
-### 3. Run locally
-
-```bash
+# Start development server
 npm run dev
-# → http://localhost:3000
-```
 
-### 4. Deploy to Vercel
-
-```bash
-npx vercel          # follow the prompts
-# Add the 4 env vars in the Vercel dashboard → Settings → Environment Variables
-# Then: npx vercel --prod
+# Open in browser
+open http://localhost:3000
 ```
 
 ---
 
-## 🆓 Free API Tiers
+## 🔑 API Key Setup
 
-| Service | What you get free | Sign up |
-|---|---|---|
-| **Groq** | 7,200 audio sec/hr · fastest Whisper available | [console.groq.com](https://console.groq.com) |
-| **Google Gemini** | 1,500 req/day · 1 M tokens/min | [aistudio.google.com](https://aistudio.google.com) |
-| **ElevenLabs** | 10,000 chars/month · multilingual v2 | [elevenlabs.io](https://elevenlabs.io) |
-| **Vercel Hobby** | 100 GB bandwidth · serverless functions | [vercel.com](https://vercel.com) |
+The app requires a **Google Gemini API Key** for live production mode.
+
+1. Get your key at [aistudio.google.com](https://aistudio.google.com)
+2. In the app header, click **Live API** mode
+3. Paste your key into the API Key field (stored in browser session only — never sent to a server)
+
+> **Demo Mode** works without any API key using simulated data and browser TTS.
 
 ---
 
 ## 📁 Project Structure
 
 ```
-myanmar-video-dubber/
-│
+htut-dubber-studio/
 ├── src/
-│   ├── app/
-│   │   ├── page.tsx                    # Main UI (client component)
-│   │   ├── layout.tsx                  # Root layout + IBM Plex Mono font
-│   │   ├── globals.css                 # Tailwind base + custom CSS
-│   │   └── api/
-│   │       ├── transcribe/route.ts     # POST → Groq Whisper
-│   │       ├── translate/route.ts      # POST → Gemini 2.0 Flash
-│   │       ├── tts/route.ts            # POST → ElevenLabs (streaming)
-│   │       └── voices/route.ts         # GET  → ElevenLabs voice list
-│   │
-│   ├── components/
-│   │   ├── DropZone.tsx                # Drag-and-drop file input
-│   │   ├── ProgressBar.tsx             # Animated progress bar
-│   │   ├── StepList.tsx                # Pipeline step tracker
-│   │   └── ApiKeyInput.tsx             # Masked key input field
-│   │
-│   ├── hooks/
-│   │   └── useDubPipeline.ts           # Full orchestration hook
-│   │
-│   ├── lib/
-│   │   ├── types.ts                    # Shared TypeScript interfaces
-│   │   └── srt.ts                      # SRT generation + download utils
-│   │
-│   └── middleware.ts                   # COEP/COOP headers for WASM
-│
-├── .env.example                        # Key template (copy → .env.local)
-├── .eslintrc.json
-├── .gitignore
-├── .prettierrc
-├── next.config.mjs                     # WASM headers + webpack config
-├── package.json                        # Pinned exact dependency versions
+│   ├── pages/
+│   │   ├── _app.js         # App wrapper + global CSS
+│   │   ├── _document.js    # HTML template + Google Fonts
+│   │   └── index.js        # Main application (all 4 Hubs)
+│   ├── styles/
+│   │   └── globals.css     # Premium design tokens + Tailwind
+│   └── lib/
+│       └── audio.js        # Audio utilities, Gemini API, constants
+├── next.config.js
+├── tailwind.config.js
 ├── postcss.config.js
-├── tailwind.config.ts
-├── tsconfig.json
-└── vercel.json                         # Function timeouts + security headers
+├── vercel.json
+└── package.json
 ```
 
 ---
 
-## 🏗 Architecture
+## 🎨 Tech Stack
 
-```
-Browser
-│
-├─► ffmpeg.wasm      Extract mono MP3 from uploaded video (client-side)
-│
-├─► POST /api/transcribe   Audio → Groq whisper-large-v3-turbo
-│        Returns: [{ id, start, end, text }]
-│
-├─► POST /api/translate    Segments → Gemini 2.0 Flash
-│        Returns: [{ id, text: "မြန်မာဘာသာ…" }]
-│
-├─► POST /api/tts (×N)     Each segment → ElevenLabs eleven_multilingual_v2
-│        Returns: audio/mpeg stream per segment
-│
-└─► ffmpeg.wasm      adelay + amix composite audio → mux with video → .mp4 + .srt
-                     Everything stays in the browser — only audio sent to transcription
-```
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 14 |
+| Styling | Tailwind CSS + Custom CSS variables |
+| Fonts | Syne (display) + JetBrains Mono + Noto Sans Myanmar |
+| AI | Google Gemini 2.5 Flash (translation + TTS) |
+| Audio | Web Audio API, PCM→WAV conversion |
+| Deployment | Vercel |
 
 ---
 
-## ⚙️ Workflows
+## 📋 Gemini API Endpoints Used
 
-| Mode | What it does |
-|---|---|
-| **Video Dub** | Replaces original audio with Burmese voice + burns Burmese subtitles |
-| **Audio Dub** | Replaces audio only, no subtitle overlay |
-| **Subtitles** | Keeps original audio, burns Burmese subtitles only (no TTS needed) |
-| **Storytelling** | Video Dub optimised for recap/narrator content |
+| Endpoint | Purpose |
+|----------|---------|
+| `gemini-2.5-flash:generateContent` | Translation & Recap Script Generation |
+| `gemini-2.5-flash-preview-tts:generateContent` | Myanmar Text-to-Speech |
 
 ---
 
-## 🔧 Burmese Voice Quality Tips
+## ⚡ Free Tier Optimization
 
-ElevenLabs' `eleven_multilingual_v2` supports Burmese script out of the box, but for the best natural-sounding result:
+The 30-second chunk scheduler is designed specifically for Gemini's **Free Tier (15 RPM)**:
 
-1. **Create a Voice Clone** in your ElevenLabs dashboard using 5–10 minutes of clean native Myanmar speaker audio.
-2. Copy the resulting Voice ID and paste it into the UI voice dropdown.
-3. The clone will speak Burmese with a far more natural accent than the default English-trained voices.
-
----
-
-## 🛠 Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| `SharedArrayBuffer is not defined` | Check `vercel.json` and `middleware.ts` have the COEP/COOP headers; redeploy |
-| Function timeout on transcription | Upgrade to Vercel Pro (60 s limit) or shorten the video |
-| `401` from any API route | Check env vars are set in Vercel dashboard with exact names, no trailing spaces |
-| `git push` asks for password | Use a GitHub Personal Access Token (Settings → Developer settings → PAT) |
-| ElevenLabs quota exceeded | Free tier is 10k chars/month; upgrade plan or reduce segment count |
-| Translation JSON parse error | Gemini auto-retries on malformed JSON; if it keeps failing, reduce batch size in `route.ts` |
+- Each video is split into ≤30s chunks
+- Chunks are processed with exponential backoff on 429 errors
+- RPM budget gauge shows real-time throughput against the 15 RPM cap
+- Parallel execution with `Promise.all` for maximum throughput within limits
 
 ---
 
-## 📄 License
+## 🌐 Myanmar Language Support
 
-MIT — free to use, modify, and deploy commercially.
+The app uses **Noto Sans Myanmar** font loaded from Google Fonts for proper rendering of all Myanmar/Burmese script characters (U+1000–U+109F).
+
+---
+
+*Built for Htut Production — Myanmar Movie Recap Content Creators*

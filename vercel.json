@@ -1,20 +1,7 @@
 {
-  "version": 2,
   "framework": "nextjs",
-  "functions": {
-    "src/app/api/transcribe/route.ts": { "maxDuration": 60, "memory": 1024 },
-    "src/app/api/translate/route.ts":  { "maxDuration": 60, "memory": 512  },
-    "src/app/api/tts/route.ts":        { "maxDuration": 30, "memory": 512  },
-    "src/app/api/voices/route.ts":     { "maxDuration": 10, "memory": 256  }
-  },
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" },
-        { "key": "Cross-Origin-Opener-Policy",   "value": "same-origin"  },
-        { "key": "Cross-Origin-Resource-Policy", "value": "cross-origin" }
-      ]
-    }
-  ]
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "installCommand": "npm install",
+  "devCommand": "npm run dev"
 }
