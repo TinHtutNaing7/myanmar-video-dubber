@@ -1,0 +1,255 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:wght@300;400;500&family=Noto+Sans+Myanmar:wght@300;400;500;700&display=swap');
+
+:root {
+  --font-display: "Cormorant Garamond";
+  --font-body:    "DM Sans";
+
+  --bg-base:       #080604;
+  --bg-surface:    #110e09;
+  --bg-elevated:   #1b1610;
+  --bg-subtle:     #221c13;
+  --border-dim:    #2e2518;
+  --border-accent: #5a4118;
+  --gold:          #d4960f;
+  --gold-bright:   #f5c842;
+  --gold-muted:    #8a620e;
+  --ember:         #c27d22;
+  --parchment:     #f2e8d5;
+  --text-primary:  #ede3cc;
+  --text-muted:    #7a6a50;
+  --text-faint:    #453c2c;
+  --danger:        #c0392b;
+  --danger-bg:     rgba(192,57,43,0.08);
+  --danger-border: rgba(192,57,43,0.25);
+  --success:       #27ae60;
+  --success-bg:    rgba(39,174,96,0.08);
+  --success-border:rgba(39,174,96,0.25);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100svh;
+}
+
+/* Ambient glow */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -5%, rgba(180,120,20,0.13) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 40% at 90% 100%, rgba(120,70,10,0.10) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Noise grain */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar               { width: 5px; }
+::-webkit-scrollbar-track         { background: var(--bg-base); }
+::-webkit-scrollbar-thumb         { background: var(--border-accent); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover   { background: var(--gold-muted); }
+
+::selection { background: rgba(212,150,15,0.28); color: var(--parchment); }
+
+/* ── API Key input ──────────────────────────────────────────────────── */
+.key-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.key-input {
+  width: 100%;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  padding: 0.65rem 3rem 0.65rem 1rem;
+  font-family: var(--font-body), monospace;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  letter-spacing: 0.04em;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  caret-color: var(--gold);
+}
+.key-input::placeholder { color: var(--text-faint); letter-spacing: 0.05em; }
+.key-input:focus {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 3px rgba(212,150,15,0.10);
+}
+.key-input.valid {
+  border-color: var(--success);
+  box-shadow: 0 0 0 3px rgba(39,174,96,0.08);
+}
+.key-toggle-btn {
+  position: absolute;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  transition: color 0.2s;
+}
+.key-toggle-btn:hover { color: var(--gold); }
+
+/* ── Myanmar textarea ───────────────────────────────────────────────── */
+.myanmar-input {
+  font-family: "Noto Sans Myanmar", serif;
+  font-size: 1.1rem;
+  line-height: 2;
+  letter-spacing: 0.02em;
+  caret-color: var(--gold);
+  resize: vertical;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-dim);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  width: 100%;
+  min-height: 148px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.myanmar-input::placeholder { color: var(--text-faint); font-family: "Noto Sans Myanmar", serif; }
+.myanmar-input:focus {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 3px rgba(212,150,15,0.08);
+}
+
+/* ── Select ─────────────────────────────────────────────────────────── */
+.lacquer-select {
+  appearance: none;
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-dim);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 0.6rem 2.5rem 0.6rem 1rem;
+  font-family: var(--font-body), sans-serif;
+  font-size: 0.88rem;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23d4960f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.85rem center;
+}
+.lacquer-select:focus { border-color: var(--border-accent); }
+.lacquer-select option { background-color: var(--bg-elevated); }
+
+/* ── Generate button ────────────────────────────────────────────────── */
+.btn-generate {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.85rem 2rem;
+  font-family: var(--font-body), sans-serif;
+  font-size: 0.88rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #0a0700;
+  background: linear-gradient(135deg, var(--gold-bright) 0%, var(--gold) 55%, var(--ember) 100%);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: filter 0.2s, transform 0.15s, box-shadow 0.2s;
+}
+.btn-generate::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.16) 0%, transparent 55%);
+}
+.btn-generate:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 6px 24px rgba(212,150,15,0.40); }
+.btn-generate:active:not(:disabled) { transform: translateY(0); }
+.btn-generate:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(0.25); }
+
+/* ── Gold divider ───────────────────────────────────────────────────── */
+.gold-rule { height: 1px; background: linear-gradient(90deg, transparent, var(--border-accent), transparent); }
+
+/* ── Audio player ───────────────────────────────────────────────────── */
+.audio-panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  padding: 1.2rem 1.4rem;
+}
+.progress-track {
+  width: 100%;
+  height: 4px;
+  background: var(--bg-subtle);
+  border-radius: 2px;
+  cursor: pointer;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold), var(--ember));
+  border-radius: 2px;
+  transition: width 0.1s linear;
+}
+.play-btn {
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-accent);
+  background: var(--bg-subtle);
+  color: var(--gold);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; flex-shrink: 0;
+  transition: background 0.2s, box-shadow 0.2s, border-color 0.2s;
+}
+.play-btn:hover { background: rgba(212,150,15,0.12); border-color: var(--gold); box-shadow: 0 0 14px rgba(212,150,15,0.25); }
+.download-btn {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.75rem; letter-spacing: 0.06em;
+  font-family: var(--font-body), sans-serif;
+  color: var(--gold);
+  border: 1px solid var(--border-accent);
+  border-radius: 4px;
+  background: transparent;
+  text-decoration: none;
+  transition: background 0.2s;
+  cursor: pointer;
+}
+.download-btn:hover { background: rgba(212,150,15,0.10); }
+
+/* Wave animation */
+.wave-bars span {
+  display: inline-block; width: 3px; height: 16px;
+  background: var(--gold); border-radius: 2px;
+  transform-origin: bottom;
+  animation: waveBar 1s ease-in-out infinite;
+}
+.wave-bars span:nth-child(2) { animation-delay: 0.15s; }
+.wave-bars span:nth-child(3) { animation-delay: 0.30s; }
+.wave-bars span:nth-child(4) { animation-delay: 0.45s; }
+.wave-bars span:nth-child(5) { animation-delay: 0.60s; }
