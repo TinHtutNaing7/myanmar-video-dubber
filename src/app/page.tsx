@@ -1,572 +1,743 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
-import type { DubSettings, PipelineStep } from "@/lib/types";
-import { useDubPipeline } from "@/hooks/useDubPipeline";
-import { downloadBlob, downloadSRT } from "@/lib/srt";
+import { useState, useEffect, useRef, useCallback } from "react";
+import AudioPlayer from "@/components/AudioPlayer";
+import { parseSrt, msToTs, type SrtSegment } from "@/components/SrtParser";
 
-// ─── Static data ──────────────────────────────────────────────────────────────
+/* ── Constants ─────────────────────────────────────────────────────────── */
+const STYLES = [
+  { value: "normal",      label: "Normal",      desc: "Clear, natural delivery" },
+  { value: "excited",     label: "Excited",     desc: "High energy, enthusiastic" },
+  { value: "whispers",    label: "Whisper",      desc: "Quiet, intimate tone" },
+  { value: "news-anchor", label: "News Anchor", desc: "Formal, authoritative" },
+  { value: "calm",        label: "Calm",        desc: "Soft, peaceful, gentle" },
+  { value: "cheerful",    label: "Cheerful",    desc: "Warm, bright, positive" },
+  { value: "sad",         label: "Somber",      desc: "Melancholic, emotional" },
+] as const;
 
 const VOICES = [
-  { id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel",  desc: "Calm, warm"          },
-  { id: "pNInz6obpgDQGcFmaJgB", name: "Adam",    desc: "Deep, authoritative" },
-  { id: "ErXwobaYiN019PkySvjV", name: "Antoni",  desc: "Well-rounded"        },
-  { id: "29vD33N1lfxlmkjXQ9yp", name: "Drew",    desc: "Conversational"      },
-  { id: "D38z5RcWu1voky8WS1ja", name: "Fin",     desc: "Smooth, engaging"    },
-  { id: "EXAVITQu4vr4xnSDxMaL", name: "Sarah",   desc: "Gentle, clear"       },
+  { value: "Kore",   note: "Female · Warm"      },
+  { value: "Aoede",  note: "Female · Bright"    },
+  { value: "Leda",   note: "Female · Smooth"    },
+  { value: "Charon", note: "Male · Deep"        },
+  { value: "Fenrir", note: "Male · Grounded"    },
+  { value: "Orus",   note: "Male · Rich"        },
+  { value: "Puck",   note: "Male · Expressive"  },
+] as const;
+
+const SAMPLES = [
+  "မင်္ဂလာပါ၊ ဒီနေ့ ရာသီဥတုကောင်းနေပါတယ်။",
+  "မြန်မာနိုင်ငံသည် အရှေ့တောင်အာရှတွင် တည်ရှိသောနိုင်ငံဖြစ်သည်။",
+  "သင်တို့ကို ကြိုဆိုပါသည်။ ဤဝန်ဆောင်မှုသည် မြန်မာဘာသာကို အသံဖြင့် ပြောင်းပေးသည်။",
 ];
 
-const TTS_MODELS = [
-  { id: "eleven_multilingual_v2", name: "Multilingual v2", desc: "Best for Burmese — recommended" },
-  { id: "eleven_turbo_v2_5",      name: "Turbo v2.5",      desc: "Faster, slightly lower quality"  },
-  { id: "eleven_flash_v2_5",      name: "Flash v2.5",      desc: "Fastest — ultra-low latency"     },
-];
+const SAMPLE_SRT = `1
+00:00:01,000 --> 00:00:04,000
+မင်္ဂလာပါ၊ ကျွန်တော်တို့ပြစာကို ကြည့်ရှုတဲ့အတွက် ကျေးဇူးတင်ပါတယ်။
 
-const WHISPER_MODELS = [
-  { id: "whisper-large-v3-turbo", name: "Whisper Large v3 Turbo", desc: "Fastest · best value", free: true },
-  { id: "whisper-large-v3",       name: "Whisper Large v3",       desc: "Highest accuracy",      free: true },
-];
+2
+00:00:05,000 --> 00:00:09,000
+မြန်မာနိုင်ငံသည် အရှေ့တောင်အာရှတွင် တည်ရှိသောနိုင်ငံဖြစ်သည်။
 
-const WORKFLOWS = [
-  { id: "video_dub",    icon: "🎙", name: "Video Dub",    desc: "Voice + Subtitles" },
-  { id: "storytelling", icon: "✨", name: "Storytelling", desc: "Recap Narrator"    },
-  { id: "audio_dub",    icon: "🔊", name: "Audio Dub",    desc: "Voice only"        },
-  { id: "subtitles",    icon: "💬", name: "Subtitles",    desc: "Subs only"         },
-];
+3
+00:00:10,500 --> 00:00:14,500
+သင်တို့ကို ကြိုဆိုပါသည်။ ဤဝန်ဆောင်မှုသည် မြန်မာဘာသာကို အသံဖြင့် ပြောင်းပေးသည်။
+`;
 
-const STEPS: { id: PipelineStep; label: string }[] = [
-  { id: "loading_ffmpeg",   label: "Loading ffmpeg.wasm"       },
-  { id: "extracting_audio", label: "Extracting audio"          },
-  { id: "transcribing",     label: "Groq Whisper transcription"},
-  { id: "translating",      label: "Gemini 2.0 Flash translate"},
-  { id: "generating_tts",   label: "ElevenLabs voice synthesis"},
-  { id: "assembling",       label: "Video assembly"            },
-  { id: "completed",        label: "Complete"                  },
-];
+const LS_KEY = "mm_tts_api_key";
 
-const DEFAULTS: DubSettings = {
-  workflow:       "video_dub",
-  voiceId:        "21m00Tcm4TlvDq8ikWAM",
-  voiceName:      "Rachel",
-  ttsModel:       "eleven_multilingual_v2",
-  whisperModel:   "whisper-large-v3-turbo",
-  outputLanguage: "Burmese (Myanmar)",
-  subtitleStyle:  "outline_black",
-  fontSize:       44,
-  groqApiKey:     "",
-  geminiApiKey:   "",
-  elevenLabsKey:  "",
-};
+type Tab = "single" | "srt";
 
-// ─── Tiny primitives ─────────────────────────────────────────────────────────
-
-function Chip({ color, children }: { color: "amber"|"green"|"blue"|"gray"; children: React.ReactNode }) {
-  const map = {
-    amber: "bg-amber-400/10 text-amber-400 border-amber-400/25",
-    green: "bg-green-500/10 text-green-400 border-green-500/25",
-    blue:  "bg-blue-500/10  text-blue-400  border-blue-500/25",
-    gray:  "bg-white/5      text-gray-400  border-white/10",
-  };
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-semibold tracking-wide ${map[color]}`}>
-      {children}
-    </span>
+/* ── SVG icons ──────────────────────────────────────────────────────────── */
+const EyeIcon = ({ off }: { off?: boolean }) =>
+  off ? (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  ) : (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M1 12S5 4 12 4s11 8 11 8-4 8-11 8S1 12 1 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
   );
-}
 
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div className={`rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-4 ${className}`}>
-      {children}
-    </div>
-  );
-}
+const CheckIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
 
-function SectionHead({ icon, title, aside }: { icon: string; title: string; aside?: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between mb-3">
-      <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-amber-400">
-        <span>{icon}</span>{title}
-      </p>
-      {aside}
-    </div>
-  );
-}
+const KeyIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <circle cx="7.5" cy="15.5" r="5.5" />
+    <path d="M21 2l-9.6 9.6" /><path d="M15.5 7.5l3 3L22 7l-3-3" />
+  </svg>
+);
 
-function Opt({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`w-full text-left rounded-xl border px-3 py-2.5 text-sm transition-all duration-150 focus:outline-none ${
-        on
-          ? "border-amber-400/70 bg-amber-400/[0.08] shadow-[0_0_16px_rgba(251,191,36,0.1)]"
-          : "border-white/[0.07] hover:border-amber-400/30 hover:bg-white/[0.04]"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
+const SoundIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <path d="M11 5L6 9H2v6h4l5 4V5z" />
+    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+  </svg>
+);
 
-function SecretInput({
-  label, placeholder, hint, value, onChange,
-}: {
-  label: string; placeholder: string; hint: React.ReactNode;
-  value: string; onChange: (v: string) => void;
-}) {
-  const [show, setShow] = useState(false);
+const Spinner = () => (
+  <svg className="animate-spin-slow" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+  </svg>
+);
+
+const FilmIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <rect x="2" y="2" width="20" height="20" rx="2.18" />
+    <line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/>
+    <line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/>
+    <line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/>
+    <line x1="17" y1="7" x2="22" y2="7"/>
+  </svg>
+);
+
+const SubIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <rect x="2" y="4" width="20" height="16" rx="2"/>
+    <path d="M7 15h4m4 0h2M7 11h2m4 0h6"/>
+  </svg>
+);
+
+const Motif = () => (
+  <svg width="110" height="110" viewBox="0 0 110 110" fill="none"
+    className="absolute -top-5 -right-5 opacity-[0.06] pointer-events-none select-none" aria-hidden="true">
+    <circle cx="55" cy="55" r="53" stroke="#d4960f" strokeWidth="1" />
+    <circle cx="55" cy="55" r="39" stroke="#d4960f" strokeWidth="0.5" />
+    <circle cx="55" cy="55" r="24" stroke="#d4960f" strokeWidth="1" />
+    {[0,45,90,135,180,225,270,315].map(d => (
+      <line key={d} x1="55" y1="55"
+        x2={55 + 53 * Math.cos(d * Math.PI / 180)}
+        y2={55 + 53 * Math.sin(d * Math.PI / 180)}
+        stroke="#d4960f" strokeWidth="0.5" />
+    ))}
+  </svg>
+);
+
+/* ── Small progress display for SRT stitching ────────────────────────── */
+function StitchProgress({ current, total, step }: { current: number; total: number; step: string }) {
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
   return (
-    <div>
-      <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5">{label}</p>
-      <div className="relative">
-        <input
-          type={show ? "text" : "password"}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          spellCheck={false}
-          autoComplete="off"
-          className="w-full bg-black/30 border border-white/[0.08] rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-amber-400/50 pr-14 font-mono transition-colors"
-        />
-        <button
-          type="button"
-          onClick={() => setShow(!show)}
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-500 hover:text-amber-400 font-semibold tracking-widest transition-colors"
-        >
-          {show ? "HIDE" : "SHOW"}
-        </button>
+    <div className="rounded-lg px-4 py-3 animate-fade-in" style={{
+      background: "rgba(212,150,15,0.07)",
+      border: "1px solid var(--border-dim)",
+    }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs uppercase tracking-widest" style={{ color: "var(--gold)" }}>
+          Stitching Timeline
+        </span>
+        <span className="text-xs tabular-nums" style={{ color: "var(--text-muted)" }}>
+          {current} / {total}
+        </span>
       </div>
-      <p className="text-[11px] text-gray-600 mt-1.5 leading-relaxed">{hint}</p>
+      <div className="w-full rounded-full h-1.5" style={{ background: "var(--border-dim)" }}>
+        <div className="h-1.5 rounded-full transition-all duration-300" style={{
+          width: `${pct}%`,
+          background: "linear-gradient(90deg, var(--gold), #f5c842)",
+        }} />
+      </div>
+      <p className="mt-2 text-xs truncate" style={{ color: "var(--text-faint)" }}>{step}</p>
     </div>
   );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+/* ── Segment table ──────────────────────────────────────────────────────── */
+function SegmentTable({ segments }: { segments: SrtSegment[] }) {
+  if (segments.length === 0) return null;
+  return (
+    <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--border-dim)" }}>
+      <div className="px-3 py-2 text-xs uppercase tracking-widest flex items-center gap-2"
+        style={{ background: "rgba(212,150,15,0.07)", color: "var(--gold)", borderBottom: "1px solid var(--border-dim)" }}>
+        <SubIcon />
+        {segments.length} subtitle segments parsed
+      </div>
+      <div style={{ maxHeight: "220px", overflowY: "auto" }}>
+        {segments.map(seg => (
+          <div key={seg.index} className="px-3 py-2 flex gap-3 items-start text-xs"
+            style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+            <span className="tabular-nums flex-shrink-0 w-6 text-right"
+              style={{ color: "var(--text-faint)" }}>{seg.index}</span>
+            <span className="flex-shrink-0 tabular-nums"
+              style={{ color: "var(--gold)", fontVariantNumeric: "tabular-nums" }}>
+              {msToTs(seg.startMs)} → {msToTs(seg.endMs)}
+            </span>
+            <span style={{ color: "var(--parchment)", fontFamily: "Noto Sans Myanmar, serif" }}
+              className="leading-relaxed">{seg.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
-export default function Home() {
-  const [file, setFile]           = useState<File | null>(null);
-  const [dragging, setDragging]   = useState(false);
-  const [cfg, setCfg]             = useState<DubSettings>(DEFAULTS);
-  const [showModels, setModels]   = useState(false);
-  const fileRef                   = useRef<HTMLInputElement>(null);
+/* ── Main Page ──────────────────────────────────────────────────────────── */
+export default function HomePage() {
+  const [tab, setTab] = useState<Tab>("single");
 
-  const { state, run, reset } = useDubPipeline();
+  /* ── API key state ── */
+  const [apiKey,   setApiKey]   = useState("");
+  const [showKey,  setShowKey]  = useState(false);
+  const [keySaved, setKeySaved] = useState(false);
 
-  const set = <K extends keyof DubSettings>(k: K, v: DubSettings[K]) =>
-    setCfg((c) => ({ ...c, [k]: v }));
+  /* ── Single-mode state ── */
+  const [text,      setText]      = useState("");
+  const [style,     setStyle]     = useState("normal");
+  const [voice,     setVoice]     = useState("Kore");
+  const [loading,   setLoading]   = useState(false);
+  const [audioSrc,  setAudioSrc]  = useState<string | null>(null);
+  const [error,     setError]     = useState<string | null>(null);
+  const [charCount, setCharCount] = useState(0);
 
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); setDragging(false);
-    const f = e.dataTransfer.files[0];
-    if (f) setFile(f);
+  /* ── SRT mode state ── */
+  const [srtText,        setSrtText]        = useState("");
+  const [segments,       setSegments]       = useState<SrtSegment[]>([]);
+  const [srtError,       setSrtError]       = useState<string | null>(null);
+  const [targetDurSec,   setTargetDurSec]   = useState<string>("");
+  const [srtLoading,     setSrtLoading]     = useState(false);
+  const [srtAudioSrc,    setSrtAudioSrc]    = useState<string | null>(null);
+  const [srtGenError,    setSrtGenError]    = useState<string | null>(null);
+  const [stitchProgress, setStitchProgress] = useState<{ current: number; total: number; step: string } | null>(null);
+  const [srtStyle,       setSrtStyle]       = useState("normal");
+  const [srtVoice,       setSrtVoice]       = useState("Kore");
+
+  const singleBlobRef = useRef<string | null>(null);
+  const srtBlobRef    = useRef<string | null>(null);
+
+  /* Load saved key on mount */
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LS_KEY);
+      if (saved) { setApiKey(saved); setKeySaved(true); }
+    } catch {}
   }, []);
 
-  const canStart = !!file && !!cfg.groqApiKey && !!cfg.geminiApiKey &&
-    (cfg.workflow === "subtitles" || !!cfg.elevenLabsKey);
+  function saveKey() {
+    const trimmed = apiKey.trim();
+    if (!trimmed) return;
+    try { localStorage.setItem(LS_KEY, trimmed); setKeySaved(true); } catch {}
+  }
 
-  const handleStart = async () => {
-    if (!canStart) return;
-    await run(file!, cfg);
-  };
+  function clearKey() {
+    try { localStorage.removeItem(LS_KEY); } catch {}
+    setApiKey(""); setKeySaved(false);
+  }
 
-  const handleReset = () => { setFile(null); reset(); };
+  function handleKeyChange(v: string) {
+    setApiKey(v);
+    setKeySaved(false);
+    if (error?.toLowerCase().includes("key")) setError(null);
+  }
 
-  const isIdle      = state.step === "idle";
-  const isDone      = state.step === "completed";
-  const isFailed    = state.step === "error";
-  const hasJob      = !isIdle;
-  const curIdx      = STEPS.findIndex((s) => s.id === state.step);
+  function handleTextChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const v = e.target.value.slice(0, 4000);
+    setText(v); setCharCount(v.length);
+  }
+
+  function useSample() {
+    const s = SAMPLES[Math.floor(Math.random() * SAMPLES.length)];
+    setText(s); setCharCount(s.length);
+  }
+
+  /* ── Single-mode generate ── */
+  async function generate() {
+    if (!text.trim()) return;
+    setLoading(true); setError(null);
+    if (singleBlobRef.current) { URL.revokeObjectURL(singleBlobRef.current); singleBlobRef.current = null; }
+    setAudioSrc(null);
+
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, style, voice, apiKey: apiKey.trim() }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      singleBlobRef.current = url;
+      setAudioSrc(url);
+      if (apiKey.trim() && !keySaved) saveKey();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Generation failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /* ── SRT parse on change ── */
+  const handleSrtChange = useCallback((v: string) => {
+    setSrtText(v);
+    setSrtError(null);
+    setSrtAudioSrc(null);
+    setSrtGenError(null);
+    if (!v.trim()) { setSegments([]); return; }
+    try {
+      const parsed = parseSrt(v);
+      if (parsed.length === 0) {
+        setSrtError("No valid SRT blocks found. Check the format.");
+        setSegments([]);
+      } else if (parsed.length > 50) {
+        setSrtError(`Too many segments (${parsed.length}). Maximum is 50.`);
+        setSegments(parsed.slice(0, 50));
+      } else {
+        setSegments(parsed);
+      }
+    } catch {
+      setSrtError("Failed to parse SRT. Verify the format.");
+      setSegments([]);
+    }
+  }, []);
+
+  function useSampleSrt() {
+    handleSrtChange(SAMPLE_SRT);
+    // Auto-set target duration from sample (15 seconds)
+    setTargetDurSec("15");
+  }
+
+  /* ── SRT generate ── */
+  async function generateSrt() {
+    if (segments.length === 0) return;
+    setSrtLoading(true); setSrtGenError(null); setStitchProgress(null);
+    if (srtBlobRef.current) { URL.revokeObjectURL(srtBlobRef.current); srtBlobRef.current = null; }
+    setSrtAudioSrc(null);
+
+    try {
+      const maxEndMs      = Math.max(...segments.map(s => s.endMs));
+      const targetDurMs   = targetDurSec.trim()
+        ? Math.max(Math.round(parseFloat(targetDurSec) * 1000), maxEndMs)
+        : maxEndMs + 1000; // 1s tail by default
+
+      setStitchProgress({ current: 0, total: segments.length, step: "Starting…" });
+
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          segments,
+          targetDurationMs: targetDurMs,
+          style: srtStyle,
+          voice: srtVoice,
+          apiKey: apiKey.trim(),
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+
+      const segCount = parseInt(res.headers.get("X-Segment-Count") ?? "0", 10);
+      setStitchProgress({ current: segCount, total: segCount, step: "Assembling WAV…" });
+
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      srtBlobRef.current = url;
+      setSrtAudioSrc(url);
+      setStitchProgress(null);
+
+      if (apiKey.trim() && !keySaved) saveKey();
+    } catch (err: unknown) {
+      setSrtGenError(err instanceof Error ? err.message : "Stitching failed.");
+      setStitchProgress(null);
+    } finally {
+      setSrtLoading(false);
+    }
+  }
+
+  const keyValid    = apiKey.trim().startsWith("AIza") && apiKey.trim().length > 20;
+  const canGenerate = text.trim().length > 0 && !loading && keyValid;
+  const canSrtGen   = segments.length > 0 && !srtLoading && keyValid;
+
+  /* ── computed SRT timeline info ── */
+  const maxEndMs    = segments.length ? Math.max(...segments.map(s => s.endMs)) : 0;
+  const effectiveDurMs = targetDurSec.trim()
+    ? Math.max(Math.round(parseFloat(targetDurSec) * 1000), maxEndMs)
+    : maxEndMs + 1000;
 
   return (
-    <div className="min-h-screen bg-[#06090f] text-white font-mono">
+    <main className="relative z-10 min-h-screen flex flex-col items-center px-4 py-14"
+      style={{ fontFamily: "var(--font-body)" }}>
 
-      {/* Grid overlay */}
-      <div className="fixed inset-0 pointer-events-none opacity-[0.025]"
-        style={{ backgroundImage:"linear-gradient(#4f8ef7 1px,transparent 1px),linear-gradient(90deg,#4f8ef7 1px,transparent 1px)", backgroundSize:"44px 44px" }} />
-
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-50 border-b border-white/[0.07] bg-[#06090f]/95 backdrop-blur px-5 py-3.5">
-        <div className="max-w-6xl mx-auto flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-black font-black text-sm bg-gradient-to-br from-amber-400 to-orange-500 select-none shrink-0">မြ</div>
-          <div>
-            <h1 className="text-[11px] font-bold tracking-[0.22em] uppercase text-white">Myanmar Video Dubber</h1>
-            <p className="text-[10px] text-gray-600 tracking-wider mt-0.5">Groq · Gemini 2.0 · ElevenLabs · ffmpeg.wasm</p>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            <Chip color="green">FREE TIER</Chip>
-            <Chip color="blue">VERCEL</Chip>
-            <a href="https://github.com" target="_blank" rel="noreferrer"
-               className="text-[11px] text-gray-500 hover:text-amber-400 transition-colors tracking-wider ml-1">GitHub ↗</a>
-          </div>
-        </div>
+      {/* ── Header ── */}
+      <header className="text-center mb-10 animate-fade-up">
+        <p className="text-xs tracking-[0.3em] uppercase mb-3" style={{ color: "var(--gold)" }}>
+          Google Gemini TTS
+        </p>
+        <h1 style={{
+          fontFamily: "var(--font-display)",
+          fontSize: "clamp(2.2rem,5.5vw,3.8rem)",
+          fontWeight: 500, letterSpacing: "-0.01em", lineHeight: 1.15,
+          color: "var(--parchment)",
+        }}>
+          Myanmar{" "}
+          <em style={{ color: "var(--gold)", fontStyle: "italic" }}>Voice</em>
+        </h1>
+        <p className="mt-2 text-base" style={{
+          fontFamily: "Noto Sans Myanmar, serif",
+          color: "var(--text-muted)", letterSpacing: "0.04em",
+        }}>
+          မြန်မာစာကို သဘာဝကျသော အသံဖြင့် ပြောင်းလဲပေးသည်
+        </p>
+        <div className="gold-rule w-20 mx-auto mt-5" />
       </header>
 
-      {/* ── Body ───────────────────────────────────────────────────────────── */}
-      <main className="relative max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5">
+      {/* ── Card ── */}
+      <div className="w-full max-w-2xl rounded-xl relative overflow-hidden"
+        style={{
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-dim)",
+          boxShadow: "0 8px 48px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.4)",
+        }}>
+        <Motif />
 
-        {/* ══ LEFT ══ */}
-        <div className="space-y-4">
+        <div className="relative z-10 p-6 sm:p-8 space-y-6">
 
-          {/* ─ Upload / Progress toggle ─ */}
-          {!hasJob ? (
-            <>
-              {/* Upload card */}
-              <Card>
-                <div className="flex -mx-4 -mt-4 mb-4 border-b border-white/[0.07] rounded-t-2xl overflow-hidden">
-                  {["Upload File","TikTok URL"].map((t,i) => (
-                    <div key={t} className={`flex-1 py-3 text-[11px] font-semibold tracking-widest uppercase flex items-center justify-center gap-2 ${i===0?"bg-white/[0.05] text-white border-r border-white/[0.07]":"text-gray-600"}`}>
-                      {i===0?"↑":""} {t}
-                    </div>
-                  ))}
-                </div>
+          {/* ── API Key ── */}
+          <section className="animate-fade-up" style={{ animationDelay: "0.05s" }}>
+            <div className="flex items-center justify-between mb-2">
+              <label htmlFor="api-key" className="flex items-center gap-1.5 text-xs uppercase tracking-widest"
+                style={{ color: "var(--gold)" }}>
+                <KeyIcon />
+                Gemini API Key
+              </label>
+              <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer"
+                className="text-xs transition-colors"
+                style={{ color: "var(--text-muted)" }}
+                onMouseOver={e => (e.currentTarget.style.color = "var(--gold)")}
+                onMouseOut={e  => (e.currentTarget.style.color = "var(--text-muted)")}>
+                Get free key ↗
+              </a>
+            </div>
+            <div className="flex gap-2">
+              <div className="key-input-wrap flex-1">
+                <input
+                  id="api-key"
+                  type={showKey ? "text" : "password"}
+                  className={`key-input${keyValid ? " valid" : ""}`}
+                  placeholder="AIzaSy••••••••••••••••••••••••••••••••"
+                  value={apiKey}
+                  onChange={e => handleKeyChange(e.target.value)}
+                  autoComplete="off" spellCheck={false} aria-label="Gemini API Key"
+                />
+                <button className="key-toggle-btn" onClick={() => setShowKey(p => !p)}
+                  aria-label={showKey ? "Hide key" : "Show key"} type="button">
+                  <EyeIcon off={showKey} />
+                </button>
+              </div>
+              {keySaved ? (
+                <button onClick={clearKey} type="button"
+                  className="flex items-center gap-1.5 px-3 rounded-md text-xs transition-colors flex-shrink-0"
+                  style={{ border: "1px solid var(--success)", color: "var(--success)", background: "var(--success-bg)", fontFamily: "var(--font-body)" }}>
+                  <CheckIcon />Saved
+                </button>
+              ) : (
+                <button onClick={saveKey} disabled={!keyValid} type="button"
+                  className="flex-shrink-0 px-4 rounded-md text-xs font-medium transition-all"
+                  style={{
+                    border: `1px solid ${keyValid ? "var(--border-accent)" : "var(--border-dim)"}`,
+                    color: keyValid ? "var(--gold)" : "var(--text-faint)",
+                    background: "transparent", fontFamily: "var(--font-body)",
+                    cursor: keyValid ? "pointer" : "not-allowed",
+                  }}>
+                  Save
+                </button>
+              )}
+            </div>
+            <p className="mt-1.5 text-xs" style={{ color: "var(--text-faint)" }}>
+              Your key is stored in your browser only — never sent to our servers without your request.
+            </p>
+          </section>
 
-                {/* Drop zone */}
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-                  onDragLeave={() => setDragging(false)}
-                  onDrop={onDrop}
-                  onClick={() => fileRef.current?.click()}
-                  className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer select-none transition-all duration-200 ${
-                    dragging ? "border-amber-400 bg-amber-400/5 scale-[1.01]"
-                    : file   ? "border-green-500/50 bg-green-500/[0.04]"
-                             : "border-white/[0.1] hover:border-amber-400/40 hover:bg-white/[0.03]"
-                  }`}
-                >
-                  <input ref={fileRef} type="file" accept=".mp4,.mov,.webm,.avi,.mkv" className="hidden"
-                    onChange={(e) => e.target.files?.[0] && setFile(e.target.files[0])} />
-                  {file ? (
-                    <div className="space-y-1.5">
-                      <div className="text-4xl">✅</div>
-                      <p className="text-sm font-semibold text-green-400 truncate max-w-xs mx-auto">{file.name}</p>
-                      <p className="text-xs text-gray-500">{(file.size/1024/1024).toFixed(1)} MB</p>
-                      <button onClick={(e) => { e.stopPropagation(); setFile(null); }}
-                        className="text-[11px] text-red-400 hover:text-red-300 underline underline-offset-2">Remove</button>
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5">
-                      <div className="text-5xl opacity-20 mb-3">⬆</div>
-                      <p className="text-sm font-semibold">Drop your video here or click to browse</p>
-                      <p className="text-xs text-gray-500">MP4 · MOV · WebM · AVI — up to 512 MB</p>
-                    </div>
-                  )}
-                </div>
-              </Card>
-
-              {/* Workflow */}
-              <Card>
-                <SectionHead icon="⬡" title="Workflow" />
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {WORKFLOWS.map((w) => (
-                    <button key={w.id} onClick={() => set("workflow", w.id as DubSettings["workflow"])}
-                      className={`rounded-xl border p-3 text-left transition-all focus:outline-none ${
-                        cfg.workflow===w.id ? "border-amber-400/70 bg-amber-400/[0.08] shadow-[0_0_18px_rgba(251,191,36,0.1)]"
-                                            : "border-white/[0.07] hover:border-amber-400/30"}`}>
-                      <div className="text-2xl mb-1.5">{w.icon}</div>
-                      <div className="text-xs font-bold">{w.name}</div>
-                      <div className="text-[10px] text-gray-500 mt-0.5">{w.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </Card>
-
-              {/* API Keys */}
-              <Card>
-                <SectionHead icon="🔑" title="API Keys" />
-                <div className="space-y-4">
-                  <SecretInput
-                    label="Groq API Key — Transcription"
-                    placeholder="gsk_xxxxxxxxxxxxxxxxxxxx"
-                    hint={<>Free · 7,200 audio sec/hr · <a href="https://console.groq.com" target="_blank" rel="noreferrer" className="text-amber-400/70 hover:text-amber-400 underline">console.groq.com</a></>}
-                    value={cfg.groqApiKey} onChange={(v) => set("groqApiKey",v)} />
-                  <SecretInput
-                    label="Gemini API Key — Translation"
-                    placeholder="AIzaSyxxxxxxxxxxxxxxx"
-                    hint={<>Free · 1,500 req/day · <a href="https://aistudio.google.com" target="_blank" rel="noreferrer" className="text-amber-400/70 hover:text-amber-400 underline">aistudio.google.com</a></>}
-                    value={cfg.geminiApiKey} onChange={(v) => set("geminiApiKey",v)} />
-                  {cfg.workflow !== "subtitles" && (
-                    <SecretInput
-                      label="ElevenLabs API Key — Voiceover"
-                      placeholder="sk_xxxxxxxxxxxxxxxxxxxxxxxx"
-                      hint={<>Free · 10,000 chars/month · <a href="https://elevenlabs.io" target="_blank" rel="noreferrer" className="text-amber-400/70 hover:text-amber-400 underline">elevenlabs.io</a></>}
-                      value={cfg.elevenLabsKey} onChange={(v) => set("elevenLabsKey",v)} />
-                  )}
-                </div>
-              </Card>
-
-              {/* Submit */}
-              <button onClick={handleStart} disabled={!canStart}
-                className={`w-full py-4 rounded-2xl text-sm font-bold tracking-[0.2em] uppercase transition-all duration-200 ${
-                  canStart
-                    ? "bg-amber-500 hover:bg-amber-400 text-black shadow-[0_4px_32px_rgba(251,191,36,0.28)] hover:shadow-[0_4px_40px_rgba(251,191,36,0.45)] hover:scale-[1.01]"
-                    : "bg-white/[0.04] border border-white/[0.07] text-gray-600 cursor-not-allowed"}`}>
-                ▶ Start Myanmar Dubbing
+          {/* ── Tab switcher ── */}
+          <div className="flex rounded-lg overflow-hidden animate-fade-up" style={{ animationDelay: "0.08s", border: "1px solid var(--border-dim)" }}>
+            {([
+              { id: "single" as Tab, label: "Single Text", icon: <SoundIcon /> },
+              { id: "srt"    as Tab, label: "SRT Timeline", icon: <FilmIcon /> },
+            ] as const).map(t => (
+              <button key={t.id} type="button"
+                onClick={() => setTab(t.id)}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 text-xs uppercase tracking-widest transition-all"
+                style={{
+                  background: tab === t.id ? "rgba(212,150,15,0.12)" : "transparent",
+                  color: tab === t.id ? "var(--gold)" : "var(--text-faint)",
+                  borderRight: t.id === "single" ? "1px solid var(--border-dim)" : "none",
+                  fontFamily: "var(--font-body)",
+                }}>
+                {t.icon}
+                {t.label}
               </button>
-            </>
-          ) : (
-            /* ─ Progress panel ─ */
-            <Card>
-              <div className="flex items-start justify-between mb-5">
-                <div>
-                  <h2 className="text-sm font-bold tracking-wide">
-                    {isDone?"✅ Complete" : isFailed?"❌ Failed" : "⚙ Processing…"}
-                  </h2>
-                  <p className="text-[10px] text-gray-600 mt-1 truncate max-w-xs">{file?.name}</p>
-                </div>
-                {(isDone||isFailed) && (
-                  <button onClick={handleReset}
-                    className="text-[11px] text-amber-400 hover:text-amber-300 border border-amber-400/25 px-3 py-1.5 rounded-lg transition-colors tracking-wider">
-                    ↺ New job
-                  </button>
-                )}
-              </div>
+            ))}
+          </div>
 
-              {/* Bar */}
-              <div className="mb-5">
-                <div className="flex justify-between text-[11px] text-gray-500 mb-1.5">
-                  <span className="truncate max-w-[74%]">{state.message}</span>
-                  <span className="font-bold text-white ml-2 shrink-0">{state.progress}%</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
-                  <div className="h-full rounded-full transition-all duration-700"
-                    style={{
-                      width:`${state.progress}%`,
-                      background: isDone?"#22c55e" : isFailed?"#ef4444" : "linear-gradient(90deg,#d97706,#f59e0b)",
-                      boxShadow: isDone?"0 0 8px rgba(34,197,94,.5)" : isFailed?"0 0 8px rgba(239,68,68,.5)" : "0 0 10px rgba(251,191,36,.5)",
-                    }} />
-                </div>
-              </div>
+          <div className="gold-rule animate-fade-up" style={{ animationDelay: "0.10s" }} />
 
-              {/* Steps */}
-              <div className="space-y-1 mb-4">
-                {STEPS.map((s, i) => {
-                  const done = isDone || (curIdx > i && curIdx >= 0);
-                  const cur  = state.step === s.id && !isDone;
-                  return (
-                    <div key={s.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all ${cur?"bg-amber-400/[0.06] border border-amber-400/15":""} ${(!done&&!cur)?"opacity-25":""}`}>
-                      <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
-                        done?"bg-green-500 text-white" : cur?"bg-amber-500 text-black animate-pulse" : "bg-white/[0.06] text-gray-600"}`}>
-                        {done?"✓":cur?"●":"○"}
-                      </div>
-                      <span className={`text-xs flex-1 ${done?"line-through opacity-40":""}`}>{s.label}</span>
-                      {cur  && <span className="text-[10px] text-amber-400 font-bold animate-pulse shrink-0">RUNNING</span>}
-                      {done && !isDone && <span className="text-[10px] text-green-500 shrink-0">DONE</span>}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Segment preview */}
-              {state.segments.length > 0 && (
-                <div className="border-t border-white/[0.06] pt-4">
-                  <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">
-                    Segments ({state.segments.length})
-                  </p>
-                  <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
-                    {state.segments.slice(0,15).map((seg) => (
-                      <div key={seg.id} className="text-[11px] leading-relaxed">
-                        <span className="text-amber-400/50">[{seg.start.toFixed(1)}s–{seg.end.toFixed(1)}s]</span>
-                        <span className="ml-2 text-gray-300">{seg.translated_text ?? seg.text}</span>
-                      </div>
-                    ))}
-                    {state.segments.length > 15 && (
-                      <p className="text-[10px] text-gray-600">… {state.segments.length-15} more</p>
-                    )}
+          {/* ════════════════════════════════════ SINGLE TAB ════ */}
+          {tab === "single" && (
+            <>
+              <section className="animate-fade-up" style={{ animationDelay: "0.15s" }}>
+                <div className="flex items-baseline justify-between mb-2">
+                  <label htmlFor="myanmar-text" className="text-xs uppercase tracking-widest" style={{ color: "var(--gold)" }}>
+                    Myanmar Text
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <button onClick={useSample} type="button"
+                      className="text-xs transition-colors"
+                      style={{ color: "var(--text-muted)" }}
+                      onMouseOver={e => (e.currentTarget.style.color = "var(--gold)")}
+                      onMouseOut={e  => (e.currentTarget.style.color = "var(--text-muted)")}>
+                      ↗ sample
+                    </button>
+                    <span className="text-xs tabular-nums"
+                      style={{ color: charCount > 3600 ? "#ef4444" : "var(--text-faint)" }}>
+                      {charCount} / 4000
+                    </span>
                   </div>
                 </div>
-              )}
+                <textarea id="myanmar-text" className="myanmar-input"
+                  placeholder="မြန်မာဘာသာ စာသားရိုက်ထည့်ပါ…"
+                  value={text} onChange={handleTextChange} rows={6} spellCheck={false} />
+              </section>
 
-              {/* Downloads */}
-              {isDone && state.outputUrl && (
-                <div className="mt-5 space-y-2 border-t border-white/[0.06] pt-5">
-                  <button onClick={() => downloadBlob(state.outputUrl!, "myanmar_dubbed.mp4")}
-                    className="flex items-center justify-center gap-2 w-full py-3 bg-green-600 hover:bg-green-500 rounded-xl text-sm font-bold tracking-wide transition-all hover:shadow-[0_0_20px_rgba(34,197,94,.25)]">
-                    ↓ Download Dubbed Video (.mp4)
-                  </button>
-                  {state.srtContent && (
-                    <button onClick={() => downloadSRT(state.srtContent!)}
-                      className="flex items-center justify-center gap-2 w-full py-3 border border-amber-400/30 hover:border-amber-400/60 rounded-xl text-sm font-medium text-amber-400 hover:text-amber-300 transition-all">
-                      ↓ Download Subtitles (.srt)
-                    </button>
+              <section className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-fade-up" style={{ animationDelay: "0.20s" }}>
+                <div>
+                  <label htmlFor="audio-style" className="block text-xs uppercase tracking-widest mb-2" style={{ color: "var(--gold)" }}>
+                    Audio Style
+                  </label>
+                  <select id="audio-style" className="lacquer-select w-full" value={style} onChange={e => setStyle(e.target.value)}>
+                    {STYLES.map(s => <option key={s.value} value={s.value}>{s.label} — {s.desc}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="voice-select" className="block text-xs uppercase tracking-widest mb-2" style={{ color: "var(--gold)" }}>
+                    Voice
+                  </label>
+                  <select id="voice-select" className="lacquer-select w-full" value={voice} onChange={e => setVoice(e.target.value)}>
+                    {VOICES.map(v => <option key={v.value} value={v.value}>{v.value} · {v.note}</option>)}
+                  </select>
+                </div>
+              </section>
+
+              <div className="gold-rule animate-fade-up" style={{ animationDelay: "0.25s" }} />
+
+              <section className="animate-fade-up" style={{ animationDelay: "0.30s" }}>
+                {!keyValid && apiKey.length > 0 && (
+                  <p className="text-xs mb-3 text-center" style={{ color: "#f59e0b" }}>
+                    ⚠ Key should start with "AIza" and be at least 20 characters
+                  </p>
+                )}
+                {!apiKey && (
+                  <p className="text-xs mb-3 text-center" style={{ color: "var(--text-muted)" }}>
+                    Enter your Gemini API key above to generate audio
+                  </p>
+                )}
+                <button onClick={generate} disabled={!canGenerate} className="btn-generate" aria-busy={loading}>
+                  {loading ? <><Spinner /><span>Synthesising Voice…</span></> : <><SoundIcon /><span>Generate Voiceover</span></>}
+                </button>
+              </section>
+
+              {error && (
+                <div className="rounded-lg px-4 py-3 text-sm animate-fade-in" role="alert"
+                  style={{ background: "var(--danger-bg)", border: "1px solid var(--danger-border)", color: "#fca5a5" }}>
+                  <strong className="block mb-0.5">Error</strong>
+                  {error}
+                  {(error.includes("key") || error.includes("401") || error.includes("403")) && (
+                    <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer"
+                      className="block mt-1.5 underline text-xs" style={{ color: "var(--gold)" }}>
+                      Get / check your API key at aistudio.google.com →
+                    </a>
                   )}
                 </div>
               )}
+              {audioSrc && <AudioPlayer src={audioSrc} />}
+            </>
+          )}
 
-              {/* Error */}
-              {isFailed && (
-                <div className="mt-4 rounded-xl border border-red-500/30 bg-red-900/10 p-3 text-xs text-red-300 leading-relaxed">
-                  <span className="text-red-400 font-bold block mb-1">Error</span>
-                  {state.error ?? state.message}
+          {/* ════════════════════════════════════ SRT TAB ════ */}
+          {tab === "srt" && (
+            <>
+              {/* SRT input */}
+              <section className="animate-fade-up" style={{ animationDelay: "0.15s" }}>
+                <div className="flex items-baseline justify-between mb-2">
+                  <label htmlFor="srt-input" className="text-xs uppercase tracking-widest flex items-center gap-1.5" style={{ color: "var(--gold)" }}>
+                    <SubIcon />SRT Subtitles
+                  </label>
+                  <button onClick={useSampleSrt} type="button"
+                    className="text-xs transition-colors"
+                    style={{ color: "var(--text-muted)" }}
+                    onMouseOver={e => (e.currentTarget.style.color = "var(--gold)")}
+                    onMouseOut={e  => (e.currentTarget.style.color = "var(--text-muted)")}>
+                    ↗ sample
+                  </button>
+                </div>
+                <textarea id="srt-input" className="myanmar-input"
+                  placeholder={"1\n00:00:01,000 --> 00:00:04,000\nမင်္ဂလာပါ…\n\n2\n00:00:05,000 --> 00:00:08,000\nမြန်မာနိုင်ငံ…"}
+                  value={srtText}
+                  onChange={e => handleSrtChange(e.target.value)}
+                  rows={8} spellCheck={false}
+                  style={{ fontFamily: "monospace, Noto Sans Myanmar, serif", fontSize: "0.8rem" }}
+                />
+                {srtError && (
+                  <p className="mt-1.5 text-xs" style={{ color: "#f87171" }}>⚠ {srtError}</p>
+                )}
+              </section>
+
+              {/* Parsed segments table */}
+              {segments.length > 0 && <SegmentTable segments={segments} />}
+
+              {/* Timeline config */}
+              {segments.length > 0 && (
+                <section className="rounded-lg p-4 animate-fade-up" style={{
+                  background: "rgba(212,150,15,0.05)",
+                  border: "1px solid var(--border-dim)",
+                }}>
+                  <p className="text-xs uppercase tracking-widest mb-3 flex items-center gap-1.5" style={{ color: "var(--gold)" }}>
+                    <FilmIcon />Timeline Configuration
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs mb-1" style={{ color: "var(--text-muted)" }}>
+                        Target Video Length (s)
+                      </label>
+                      <input
+                        type="number" min="1" step="0.5"
+                        className="lacquer-select w-full"
+                        placeholder={`auto (${Math.ceil(effectiveDurMs/1000)}s)`}
+                        value={targetDurSec}
+                        onChange={e => setTargetDurSec(e.target.value)}
+                        style={{ fontFamily: "var(--font-body)" }}
+                      />
+                      <p className="mt-1 text-xs" style={{ color: "var(--text-faint)" }}>
+                        Output: {(effectiveDurMs/1000).toFixed(1)}s WAV
+                      </p>
+                    </div>
+                    <div>
+                      <label htmlFor="srt-style" className="block text-xs mb-1" style={{ color: "var(--text-muted)" }}>Style</label>
+                      <select id="srt-style" className="lacquer-select w-full" value={srtStyle} onChange={e => setSrtStyle(e.target.value)}>
+                        {STYLES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="srt-voice" className="block text-xs mb-1" style={{ color: "var(--text-muted)" }}>Voice</label>
+                      <select id="srt-voice" className="lacquer-select w-full" value={srtVoice} onChange={e => setSrtVoice(e.target.value)}>
+                        {VOICES.map(v => <option key={v.value} value={v.value}>{v.value} · {v.note}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Timeline info pills */}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {[
+                      { label: "Segments",   val: segments.length },
+                      { label: "Last cue",   val: msToTs(maxEndMs) },
+                      { label: "Output",     val: `${(effectiveDurMs/1000).toFixed(1)}s` },
+                      { label: "Silence gaps", val: `${segments.length - 1}` },
+                    ].map(p => (
+                      <span key={p.label} className="px-2 py-0.5 rounded text-xs" style={{
+                        background: "rgba(255,255,255,0.04)",
+                        border: "1px solid var(--border-dim)",
+                        color: "var(--text-muted)",
+                      }}>
+                        {p.label}: <span style={{ color: "var(--parchment)" }}>{p.val}</span>
+                      </span>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <div className="gold-rule animate-fade-up" style={{ animationDelay: "0.25s" }} />
+
+              {/* Generate button */}
+              <section className="animate-fade-up" style={{ animationDelay: "0.30s" }}>
+                {!keyValid && apiKey.length > 0 && (
+                  <p className="text-xs mb-3 text-center" style={{ color: "#f59e0b" }}>
+                    ⚠ Enter a valid Gemini API key above
+                  </p>
+                )}
+                {segments.length === 0 && !srtError && (
+                  <p className="text-xs mb-3 text-center" style={{ color: "var(--text-muted)" }}>
+                    Paste an SRT file above to enable timeline stitching
+                  </p>
+                )}
+                <button onClick={generateSrt} disabled={!canSrtGen} className="btn-generate" aria-busy={srtLoading}>
+                  {srtLoading
+                    ? <><Spinner /><span>Stitching {segments.length} segments…</span></>
+                    : <><FilmIcon /><span>Generate Timeline Audio</span></>}
+                </button>
+              </section>
+
+              {stitchProgress && (
+                <StitchProgress
+                  current={stitchProgress.current}
+                  total={stitchProgress.total}
+                  step={stitchProgress.step}
+                />
+              )}
+
+              {srtGenError && (
+                <div className="rounded-lg px-4 py-3 text-sm animate-fade-in" role="alert"
+                  style={{ background: "var(--danger-bg)", border: "1px solid var(--danger-border)", color: "#fca5a5" }}>
+                  <strong className="block mb-0.5">Error</strong>
+                  {srtGenError}
                 </div>
               )}
-            </Card>
+
+              {srtAudioSrc && (
+                <div>
+                  <p className="text-xs uppercase tracking-widest mb-2" style={{ color: "var(--gold)" }}>
+                    Timeline-Stitched Audio · {(effectiveDurMs/1000).toFixed(1)}s · {segments.length} cues
+                  </p>
+                  <AudioPlayer src={srtAudioSrc} downloadName="myanmar-tts-timeline.wav" />
+                  <p className="mt-2 text-xs" style={{ color: "var(--text-faint)" }}>
+                    Each subtitle cue is placed at its exact SRT timestamp. Silence fills gaps between cues.
+                    Use this WAV directly in your video editor — it will be in sync with the subtitles.
+                  </p>
+                </div>
+              )}
+            </>
           )}
         </div>
+      </div>
 
-        {/* ══ RIGHT: Settings ══ */}
-        <div className="space-y-4">
-
-          {/* Output & Voice */}
-          <Card>
-            <SectionHead icon="⊕" title="Output & Voice" />
-
-            {/* Language */}
-            <div className="mb-3">
-              <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5">Language</p>
-              <div className="flex items-center justify-between bg-black/20 border border-white/[0.07] rounded-lg px-3 py-2.5">
-                <span className="text-sm">မြ မြန်မာ (Myanmar / Burmese)</span>
-                <Chip color="amber">Default</Chip>
-              </div>
-            </div>
-
-            {/* ElevenLabs Voice */}
-            {cfg.workflow !== "subtitles" && (
-              <div className="mb-3">
-                <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5">ElevenLabs Voice</p>
-                <div className="space-y-1.5 max-h-52 overflow-y-auto pr-0.5">
-                  {VOICES.map((v) => (
-                    <Opt key={v.id} on={cfg.voiceId===v.id} onClick={() => set("voiceId",v.id)}>
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-white">{v.name}<span className="font-normal text-gray-500 ml-2 text-xs">{v.desc}</span></span>
-                        {cfg.voiceId===v.id && <span className="text-amber-400 text-xs">✓</span>}
-                      </div>
-                    </Opt>
-                  ))}
-                </div>
-                <p className="text-[10px] text-gray-600 mt-2 leading-relaxed">
-                  💡 For best Burmese quality, create a Voice Clone in your ElevenLabs dashboard using native Myanmar speaker audio.
-                </p>
-              </div>
-            )}
-
-            {/* TTS Model */}
-            {cfg.workflow !== "subtitles" && (
-              <div>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5">TTS Model</p>
-                <div className="space-y-1.5">
-                  {TTS_MODELS.map((m) => (
-                    <Opt key={m.id} on={cfg.ttsModel===m.id} onClick={() => set("ttsModel",m.id)}>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <span className="font-semibold text-white text-sm">{m.name}</span>
-                          <p className="text-[11px] text-gray-500 mt-0.5">{m.desc}</p>
-                        </div>
-                        {cfg.ttsModel===m.id && <span className="text-amber-400 text-xs">✓</span>}
-                      </div>
-                    </Opt>
-                  ))}
-                </div>
-              </div>
-            )}
-          </Card>
-
-          {/* AI Models */}
-          <Card>
-            <button onClick={() => setModels(!showModels)} className="w-full flex items-center justify-between focus:outline-none">
-              <SectionHead icon="⚙" title="AI Models" />
-              <div className="flex items-center gap-2 -mt-3">
-                <Chip color="gray">Optional</Chip>
-                <span className="text-gray-600 text-xs">{showModels?"∧":"∨"}</span>
-              </div>
+      {/* ── Style pills ── */}
+      <div className="mt-6 flex flex-wrap gap-2 justify-center animate-fade-up" style={{ animationDelay: "0.38s" }}>
+        {STYLES.map(s => {
+          const active = tab === "single" ? style === s.value : srtStyle === s.value;
+          return (
+            <button key={s.value}
+              onClick={() => tab === "single" ? setStyle(s.value) : setSrtStyle(s.value)}
+              type="button"
+              className="px-3 py-1 rounded-full text-xs transition-all"
+              style={{
+                border: `1px solid ${active ? "var(--border-accent)" : "var(--border-dim)"}`,
+                background: active ? "rgba(212,150,15,0.12)" : "transparent",
+                color: active ? "var(--gold)" : "var(--text-faint)",
+              }}>
+              {s.label}
             </button>
-            {showModels && (
-              <div className="mt-2 space-y-4">
-                <div>
-                  <p className="text-[10px] text-amber-400/70 uppercase tracking-widest mb-1.5">Transcription (Groq)</p>
-                  <div className="space-y-1.5">
-                    {WHISPER_MODELS.map((m) => (
-                      <Opt key={m.id} on={cfg.whisperModel===m.id} onClick={() => set("whisperModel",m.id)}>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="font-semibold text-sm">{m.name}</span>
-                            {m.free && <Chip color="green">Free</Chip>}
-                            <p className="text-[11px] text-gray-500 mt-0.5">{m.desc}</p>
-                          </div>
-                          {cfg.whisperModel===m.id && <span className="text-amber-400 text-xs">✓</span>}
-                        </div>
-                      </Opt>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[10px] text-amber-400/70 uppercase tracking-widest mb-1.5">Translation (Gemini)</p>
-                  <div className="rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold">Gemini 2.0 Flash</span>
-                      <Chip color="green">Free</Chip>
-                    </div>
-                    <p className="text-[11px] text-gray-500 mt-0.5">Fast & accurate Burmese translation</p>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[10px] text-amber-400/70 uppercase tracking-widest mb-1.5">Video Assembly</p>
-                  <div className="rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold">ffmpeg.wasm</span>
-                      <Chip color="blue">Browser</Chip>
-                    </div>
-                    <p className="text-[11px] text-gray-500 mt-0.5">Runs locally — video never leaves your device</p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </Card>
+          );
+        })}
+      </div>
 
-          {/* Subtitle style */}
-          <Card>
-            <SectionHead icon="💬" title="Subtitle Style" />
-            <select value={cfg.subtitleStyle} onChange={(e) => set("subtitleStyle",e.target.value)}
-              className="w-full bg-black/30 border border-white/[0.08] rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400/50 mb-3 font-mono transition-colors">
-              <option value="outline_black">Outline Black (default)</option>
-              <option value="outline_white">Outline White</option>
-              <option value="drop_shadow">Drop Shadow</option>
-              <option value="plain">Plain Text</option>
-            </select>
-            <div>
-              <div className="flex justify-between text-[11px] text-gray-500 mb-2">
-                <span>Font size</span>
-                <span className="text-white font-bold">{cfg.fontSize}px</span>
-              </div>
-              <input type="range" min="20" max="72" step="2" value={cfg.fontSize}
-                onChange={(e) => set("fontSize",Number(e.target.value))}
-                className="w-full" style={{accentColor:"#f59e0b"}} />
-              <div className="flex justify-between text-[10px] text-gray-600 mt-1.5">
-                <span>20 compact</span><span>44 default</span><span>72 large</span>
-              </div>
-            </div>
-          </Card>
-
-          {/* Pipeline info */}
-          <Card>
-            <SectionHead icon="📋" title="Pipeline" />
-            <div className="space-y-2.5">
-              {[
-                { n:"01", label:"Extract audio",    tool:"ffmpeg.wasm",      c:"blue"  },
-                { n:"02", label:"Transcribe speech", tool:"Groq Whisper",     c:"green" },
-                { n:"03", label:"Translate text",    tool:"Gemini 2.0 Flash", c:"amber" },
-                { n:"04", label:"Generate voice",    tool:"ElevenLabs",       c:"amber" },
-                { n:"05", label:"Assemble video",    tool:"ffmpeg.wasm",      c:"blue"  },
-                { n:"06", label:"Export + SRT",      tool:"Browser",          c:"green" },
-              ].map(({ n, label, tool, c }) => (
-                <div key={n} className="flex items-center gap-3">
-                  <span className="text-[10px] text-gray-600 w-5 shrink-0">{n}</span>
-                  <div className="w-px h-4 bg-white/[0.08]" />
-                  <span className="text-xs text-gray-300 flex-1">{label}</span>
-                  <Chip color={c as "amber"|"green"|"blue"|"gray"}>{tool}</Chip>
-                </div>
-              ))}
-            </div>
-            <p className="text-[10px] text-gray-600 mt-3 leading-relaxed">
-              ✦ Video data stays in your browser. Only audio is sent for transcription.
-            </p>
-          </Card>
-        </div>
-      </main>
-
-      <footer className="border-t border-white/[0.05] px-5 py-4 text-center mt-4">
-        <p className="text-[10px] text-gray-700 tracking-[0.22em] uppercase">
-          Myanmar Video Dubber · MIT License · Vercel
+      {/* ── Footer ── */}
+      <footer className="mt-12 text-center text-xs" style={{ color: "var(--text-faint)" }}>
+        <p>Myanmar Voice · Gemini 2.5 Flash TTS · SRT Timeline Stitcher</p>
+        <p className="mt-1" style={{ fontFamily: "Noto Sans Myanmar, serif", fontSize: "0.72rem" }}>
+          မြန်မာဘာသာ အသံပြောင်းလဲမှုဝန်ဆောင်မှု
         </p>
       </footer>
-    </div>
+    </main>
   );
 }
